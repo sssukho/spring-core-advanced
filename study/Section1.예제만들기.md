@@ -1,0 +1,422 @@
+# Section 1. 예제 만들기
+
+## 예제 프로젝트 만들기 - VO
+
+상품을 주문하는 프로세스로 가정하고, 일반적인 웹 애플리케이션에서 Controller -> Service -> Repository 로 이어지는 흐름을 최대한 단순하게 만들어보자.
+
+
+
+### OrderRepositoryV0
+
+``` java
+package hello.advanced.app.v0;
+
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Repository;
+
+@Repository
+@RequiredArgsConstructor
+public class OrderRepositoryV0 {
+
+    public void save(String itemId) {
+        // 저장 로직
+        if (itemId.equals("ex")) {
+            throw new IllegalStateException("예외 발생!");
+        }
+        sleep(1000);
+    }
+
+    private void sleep(int millis) {
+        try {
+            Thread.sleep(millis);
+        } catch(InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+- `@Repsitory` : 컴포넌트 스캔의 대상이 된다. 따라서 스프링 빈으로 자동 등록된다.
+- `sleep(1000)` : 리포지토리는 상품을 저장하는데 약 1초 정도 걸리는 것으로 가정하기 위해 1초 지연을 주었다. (1000ms)
+  - 예외가 발생하는 상황도 확인하기 위해 파라미터 `itemId` 의 값이 `ex` 로 넘어오면 `IllegalStateException` 예외가 발생하도록 했다.
+
+
+
+### OrderServiceV0
+
+``` java
+package hello.advanced.app.v0;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+public class OrderServiceV0 {
+
+    private final OrderRepositoryV0 orderRepository;
+
+    public void orderItem(String itemId) {
+        orderRepository.save(itemId);
+    }
+}
+```
+
+- `@Service` : 컴포넌트 스캔의 대상이 된다.
+- 실무에서는 복잡한 비즈니스 로직이 서비스 계층에 포함되지만, 예제에서는 단순함을 위해서 리포지토리 저장을 호출하는 코드만 있다.
+
+
+
+### OrderControllerV0
+
+``` java
+package hello.advanced.app.v0;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequiredArgsConstructor
+public class OrderControllerV0 {
+
+    private final OrderServiceV0 orderService;
+
+    @GetMapping("/v0/request")
+    public String request(String itemId) {
+        orderService.orderItem(itemId);
+        return "ok";
+    }
+}
+```
+
+- `@RestController`: 컴포넌트 스캔과 스프링 REST 컨트롤러로 인식된다.
+- `/v0/request` 메서드는 HTTP 파라미터로 `itemId` 를 받을 수 있다.
+
+- 실행: http://localhost:8080/v0/request?itemId=hello
+
+
+
+## 로그 추적기 - 요구사항 분석
+
+기존에는 개발자가 문제가 발생한 다음에 관련 부분을 어렵게 찾아서 로그를 하나하나 직접 만들어서 남겼다. 로그를 미리 남겨둔다면 이런 부분을 손쉽게 찾을 수 있을 것이다. 이 부분을 개선하고 자동화 하는 것이 로그 로그 추적기의 핵심
+
+
+
+### 요구사항
+
+- 모든 PUBLIC 메서드의 호출과 응답 정보를 로그로 출력
+- 애플리케이션의 흐름을 변경하면 안됨
+  - 로그를 남긴다고해서 비즈니스 로직의 동작에 영향을 주면 안됨
+- 메서드 호출에 걸린 시간
+- 정상 흐름과 예외 흐름 구분
+  - 예외 발생시 예외 정보가 남아야 함
+- 메서드 호출의 깊이 표현
+- HTTP 요청을 구분
+  - HTTP 요청 단위로 특정 ID를 남겨서 어떤 HTTP 요청에서 시작된 것인지 명확하게 구분이 가능해야 함
+  - 트랜잭션 ID (DB 트랜잭션X), 여기서는 하나의 HTTP 요청이 시작해서 끝날 때 까지를 하나의 트랜잭션이라 함
+
+
+
+### 예시
+
+```
+정상 요청
+[796bccd9] OrderController.request()
+[796bccd9] |-->OrderService.orderItem()
+[796bccd9] |   |-->OrderRepository.save()
+[796bccd9] |   |<--OrderRepository.save() time=1004ms
+[796bccd9] |<--OrderService.orderItem() time=1014ms
+[796bccd9] OrderController.request() time=1016ms
+예외 발생
+[b7119f27] OrderController.request()
+[b7119f27] |-->OrderService.orderItem()
+[b7119f27] | |-->OrderRepository.save() [b7119f27] | |<X-OrderRepository.save() time=0ms ex=java.lang.IllegalStateException: 예외 발생! [b7119f27] |<X-OrderService.orderItem() time=10ms ex=java.lang.IllegalStateException: 예외 발생! [b7119f27] OrderController.request() time=11ms ex=java.lang.IllegalStateException: 예외 발생!
+
+```
+
+
+
+## 로그 추적기 V1 - 프로토타입 개발
+
+애플리케이션의 모든 로직에 직접 로그를 남겨도 되지만, 그것보다는 더 효율적인 개발 방법이 필요하다.
+
+특히 트랜잭션ID와 깊이를 표현하는 방법은 기존 정보를 이어받아야 하기 때문에 단순히 로그만 남긴다고 해결할 수 있는 것은 아니다. 요구사항에 맞추어 애플리케이션에 효과적으로 로그를 남기기 위한 로그 추적기를 개발해보자.
+
+먼저 로그 추적기를 위한 기반 데이터를 가지고 있는 `TraceId`, `TraceStatus` 클래스를 만들어보자.
+
+
+
+### TraceId
+
+``` java
+package hello.advanced.trace;
+
+import java.util.UUID;
+
+public class TraceId {
+
+    private String id;
+    private int level;
+
+    public TraceId() {
+        this.id = createId();
+        this.level = 0;
+    }
+
+    private TraceId(String id, int level) {
+        this.id = id;
+        this.level = level;
+    }
+
+    private String createId() {
+        return UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    public TraceId createNextId() {
+        return new TraceId(id, level + 1);
+    }
+
+    public TraceId createPreviousId() {
+        return new TraceId(id, level - 1);
+    }
+
+    public boolean isFirstLevel() {
+        return level == 0;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public int getLevel() {
+        return level;
+    }
+}
+```
+
+로그 추적기는 트랜잭션 ID와 깊이를 표현하는 방법이 필요하다. 여기서는 트랜잭션 ID와 깊이를 표현하는 level을 묶어서 `TraceId` 라는 개념을 만들었다. `TraceId` 는 단순히 id(트랜잭션ID)와 levl 정보를 함께 가지고 있다.
+
+
+
+**UUID**
+
+TraceId 를 처음 생성하면 createId() 를 사용해서 UUID를 만들어낸다. UUID가 너무 길어서 여기서는 앞 8자리만 사용한다. 이 정도면 로그를 충분히 구분할 수 있다. 여기서는 이렇게 만들어진 값을 트랜잭션 ID로 사용한다.
+
+```
+ab99e16f-3cde-4d24-8241-256108c203a2 //생성된 UUID
+ab99e16f // 앞 8자리만 사용
+```
+
+
+
+**createNextId()**
+
+다음 TraceId 를 만든다. 예쩨 로그를 잘 보면 깊이가 증가해도 트랜잭션ID는 같다. 대신에 깊이가 하나 증가한다.
+
+따라서 createNextId() 를 사용해서 현재 TraceId 를 기반으로 다음 TraceId 를 만들면 id는 기존과 같고, level은 하나 증가한다.
+
+
+
+**createPreviousId()**
+
+createNextId() 의 반대 역할을 한다. id는 기존과 같고, level은 하나 감소한다.
+
+
+
+**isFirstLevel()**
+
+첫 번째 레벨 여부를 편리하게 확인할 수 있는 메서드
+
+
+
+### TraceStatus
+
+``` java
+package hello.advanced.trace;
+
+public class TraceStatus {
+    
+    private TraceId traceId;
+    private Long startTimeMs;
+    private String message;
+
+    public TraceStatus(TraceId traceId, Long startTimeMs, String message) {
+        this.traceId = traceId;
+        this.startTimeMs = startTimeMs;
+        this.message = message;
+    }
+
+    public TraceId getTraceId() {
+        return traceId;
+    }
+
+    public Long getStartTimeMs() {
+        return startTimeMs;
+    }
+
+    public String getMessage() {
+        return message;
+    }
+}
+```
+
+- TraceStatus 클래스: 로그의 상태 정보를 나타낸다.
+- TraceStatus는 로그를 시작할 떄의 상태 정보를 가지고 있다. 이 상태 정보는 로그를 종료할 때 사용된다.
+- traceId: 내부에 트랜잭션ID와 level을 가지고 있다.
+- startTimeMs: 로그 시작시간. 로그 종료시 이 시작 시간을 기준으로 시작~종료까지 전체 수행 시간을 구할 수 있다.
+- message: 시작시 사용한 메시지이다. 이후 로그 종료시에도 이 메시지를 사용해서 출력한다.
+
+
+
+### HelloTraceV1
+
+``` java
+package hello.advanced.trace.hellotrace;
+
+import hello.advanced.trace.TraceId;
+import hello.advanced.trace.TraceStatus;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+@Slf4j
+@Component
+public class HelloTraceV1 {
+    private static final String START_PREFIX = "-->";
+    private static final String COMPLETE_PREFIX = "<--";
+    private static final String EX_PREFIX = "<X-";
+
+    public TraceStatus begin(String message) {
+        TraceId traceId = new TraceId();
+        Long startTimeMs = System.currentTimeMillis();
+        log.info("[{}] {}{}", traceId.getId(), addSpace(START_PREFIX, traceId.getLevel()), message);
+        return new TraceStatus(traceId, startTimeMs, message);
+    }
+
+    public void end(TraceStatus status) {
+        complete(status, null);
+    }
+
+    public void exception(TraceStatus status, Exception e) {
+        complete(status, e);
+    }
+
+    private void complete(TraceStatus status, Exception e) {
+        Long stopTimeMs = System.currentTimeMillis();
+        long resultTimeMs = stopTimeMs - status.getStartTimeMs();
+        TraceId  traceId = status.getTraceId();
+        if (e == null) {
+            log.info("[{}] {}{} time={}ms", traceId.getId(),
+                    addSpace(COMPLETE_PREFIX, traceId.getLevel()), status.getMessage(),
+                    resultTimeMs);
+        } else {
+            log.info("[{}] {}{} time={}ms ex={}", traceId.getId(),
+                    addSpace(EX_PREFIX, traceId.getLevel()), status.getMessage(), resultTimeMs,
+                    e.toString());
+        }
+    }
+
+    private static String addSpace(String prefix, int level) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < level; i++) {
+            sb.append( (i==level -1) ? "|" + prefix : "|  ");
+        }
+        return sb.toString();
+    }
+}
+```
+
+`HelloTraceV1` 을 사용해서 실제 로그를 시작하고 종료할 수 있다. 그리고 로그를 출력하고 실행시간도 측정할 수 있다.
+
+- `@Component` : 싱글톤으로 사용하기 위해 스프링 빈으로 등록한다. 컴포넌트 스캔의 대상이 된다.
+
+
+
+**공개(public) 메서드**
+
+- `TraceStatus begin(String message)`
+  - 로그를 시작한다.
+  - 로그 메시지를 파라미터로 받아서 시작 로그를 출력한다.
+  - 응답 결과로 현재 로그의 상태인 `TraceStatus` 를 반환한다.
+- `void end(TraceStatus status)`
+  - 로그를 정상 종료한다.
+  - 파라미터로 시작 로그의 상태를 전달 받는다. 이 값을 활용해서 실행 시간을 계산하고, 종료시에도 시작할 떄와 동일한 로그 메시지를 출력할 수 있다.
+  - 정상 흐름에서 호출한다.
+- `void exception(TraceStatus status, Exception e)`
+  - 로그를 예외 상황으로 종료한다.
+  - `TraceStatus`, `Exception` 정보를 함께 전달받아서 실행시간, 예외 정보를 포함한 결과 로그를 출력한다.
+  - 예외가 발생했을 때 호출한다.
+
+
+
+**비공개(private) 메서드**
+
+- `void complete(TraceStatus status, Exception e)`
+  - end(), excpetion() 의 요청 흐름을 한 곳에서 편리하게 처리한다. 실행 시간을 측정하고 로그를 남긴다.
+- `static String addSpace(String prefix, int level)` : 다음과 같은 결과를 출력한다.
+  - prefix: -->
+    - level 0:
+    - level 1: |-->
+    - level 2: |   | -->
+  - prefix: <--
+    - 위와 동일
+  - prefix: <x--
+    - 위와 동일
+
+
+
+### HelloTraceV1Test
+
+``` java
+package hello.advanced.trace.hellotrace;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import hello.advanced.trace.TraceStatus;
+import org.junit.jupiter.api.Test;
+
+class HelloTraceV1Test {
+
+    @Test
+    void begin_end() {
+        HelloTraceV1 trace = new HelloTraceV1();
+        TraceStatus status = trace.begin("hello");
+        trace.end(status);
+    }
+
+    @Test
+    void begin_exception() {
+        HelloTraceV1 trace = new HelloTraceV1();
+        TraceStatus status = trace.begin("hello");
+        trace.exception(status, new IllegalStateException());
+    }
+}
+```
+
+> [참고]
+>
+> 이것은 온전한 테스트 코드가 아니다. 일반적으로 테스트라고 하면 자동으로 검증하는 과정이 필요하다. 이 테스트는 검증하는 과정이 없고 결과를 콘솔로 직접 확인해야 한다. 이렇게 응답값이 없는 경우를 자동으로 검증하려면 여러가지 테스트 기법이 필요하다. 이번 강의에서는 예제를 최대한 단순화하기 위해 검증 테스트를 생략했다.
+
+> [주의]
+>
+> 지금까지 만든 로그 추적기가 어떻게 동작하는지 확실히 이해해야 다음 단계로 넘어갈 수 있다. 복습과 코드를 직접 만들어보면서 확실하게 본인 것을노 만들고 다음으로 넘어가자.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
