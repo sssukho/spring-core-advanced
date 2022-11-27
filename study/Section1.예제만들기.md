@@ -213,7 +213,7 @@ ab99e16f // 앞 8자리만 사용
 
 **createNextId()**
 
-다음 TraceId 를 만든다. 예쩨 로그를 잘 보면 깊이가 증가해도 트랜잭션ID는 같다. 대신에 깊이가 하나 증가한다.
+다음 TraceId 를 만든다. 예제 로그를 잘 보면 깊이가 증가해도 트랜잭션ID는 같다. 대신에 깊이가 하나 증가한다.
 
 따라서 createNextId() 를 사용해서 현재 TraceId 를 기반으로 다음 TraceId 를 만들면 id는 기존과 같고, level은 하나 증가한다.
 
@@ -404,7 +404,158 @@ class HelloTraceV1Test {
 
 
 
+## 로그 추적기 V1 - 적용
 
+이제 애플리케이션에 우리가 개발한 로그 추적기를 적용해보자.
+
+기존 V0 패키지에 코드를 직접 작성해도 되지만, 기존 코드를 유지하고, 비교하기 위해서 v1 패키지를 새로 만들고 기존 코드를 복사하자.
+
+
+
+### V1 적용하기
+
+- OrderControllerV1
+
+  ``` java
+  package hello.advanced.app.v1;
+  
+  import hello.advanced.trace.TraceStatus;
+  import hello.advanced.trace.hellotrace.HelloTraceV1;
+  import lombok.RequiredArgsConstructor;
+  import org.springframework.web.bind.annotation.GetMapping;
+  import org.springframework.web.bind.annotation.RestController;
+  
+  @RestController
+  @RequiredArgsConstructor
+  public class OrderControllerV1 {
+  
+      private final OrderServiceV1 orderService;
+      private final HelloTraceV1 trace;
+  
+      @GetMapping("/v1/request")
+      public String request(String itemId) {
+          TraceStatus status = null;
+          try {
+              status = trace.begin("OrderController.request()");
+              orderService.orderItem(itemId);
+              trace.end(status);
+              return "ok";
+          } catch (Exception e) {
+              trace.exception(status, e);
+              throw e;
+          }
+      }
+  }
+  ```
+
+  - `trace.begin("OrderController.request()")`: 로그를 시작할 때 메시지 이름으로 컨트롤러 이름 + 메서드 이름을 주었다. 이렇게 하면 어떤 컨트롤러와 메서드가 호출되었는지 로그로 편리하게 확인할 수 있다.
+  - 단순하게 trace.begin(), trace.end() 등의 두 줄의 코드만 적용하면 될 줄 알았지만 실상은 그렇지 않다. trace.exception() 으로 예외까지 처리해야 하므로 지저분한ㄷ try, catch 코드가 추가된다.
+  - begin() 의 결과 값으로 받은 TraceStatus tstaus 값을 end(), exception() 에 넘겨야 한다. 결국 try, catch 블록 모두에 이 값을 넘겨야 한다. 따라서 try 상위에 TraceStatus status 코드를 선언해야 한다.
+  - throw e: 예외를 꼭 다시 던져주어야 한다. 그렇지 않으면 여기서 예외를 먹어버리고 이후에 정상 흐름으로 동작한다. 로그는 애플리케이션 흐름에 영향을 주면 안된다. 로그 때문에 예외가 사라지면 안된다.
+  - 실행
+    - 정상: http://localhost:8080/v1/request?itemId=hello
+    - 예외: http://localhost:8080/v1/request?itemId=ex
+
+- OrderServiceV1
+
+  ``` java
+  package hello.advanced.app.v1;
+  
+  import hello.advanced.trace.TraceStatus;
+  import hello.advanced.trace.hellotrace.HelloTraceV1;
+  import lombok.RequiredArgsConstructor;
+  import org.springframework.stereotype.Service;
+  
+  @Service
+  @RequiredArgsConstructor
+  public class OrderServiceV1 {
+  
+      private final OrderRepositoryV1 orderRepository;
+      private final HelloTraceV1 trace;
+  
+      public void orderItem(String itemId) {
+          TraceStatus status = null;
+          try {
+              status = trace.begin("OrderService.orderItem()");
+              orderRepository.save(itemId);
+              trace.end(status);
+          } catch (Exception e) {
+              trace.exception(status, e);
+              throw e;
+          }
+      }
+  }
+  ```
+
+- OrderRepositoryV1
+
+  ``` java
+  package hello.advanced.app.v1;
+  
+  import hello.advanced.trace.TraceStatus;
+  import hello.advanced.trace.hellotrace.HelloTraceV1;
+  import lombok.RequiredArgsConstructor;
+  import org.springframework.stereotype.Repository;
+  
+  @Repository
+  @RequiredArgsConstructor
+  public class OrderRepositoryV1 {
+      
+      private final HelloTraceV1 trace;
+  
+      public void save(String itemId) {
+  
+          TraceStatus status = null;
+          try {
+              status = trace.begin("OrderRepository.save()");
+              // 저장 로직
+              if (itemId.equals("ex")) {
+                  throw new IllegalStateException("예외 발생!");
+              }
+              sleep(1000);
+              trace.end(status);
+          } catch (Exception e) {
+              trace.exception(status, e);
+              throw e;
+          }
+      }
+  
+      private void sleep(int millis) {
+          try {
+              Thread.sleep(millis);
+          } catch (InterruptedException e) {
+              e.printStackTrace();
+          }
+      }
+  }
+  ```
+
+  - 정상 실행: http://localhost:8080/v1/request?itemId=hello
+
+![1-1](./img/1-1.png)
+
+![1-2](./img/1-2.png)
+
+HelloTraceV1 덕분에 직접 로그를 하나하나 남기는 것 보다는 편하게 여러가지 로그를 남길 수 있었다. 하지만 로그를 남기기 위한 코드가 생각보다 너무 복잡하다. 지금은 우선 요구사항과 동작하는 것에만 집중하자.
+
+
+
+### 남은 문제 - 요구사항
+
+- ~~모든 PUBLIC 메서드의 호출과 응답 정보를 로그로 출력~~
+- ~~애플리케이션의 흐름을 변경하면 안됨~~
+  - ~~로그를 남긴다고해서 비즈니스 로직의 동작에 영향을 주면 안됨~~
+- ~~메서드 호출에 걸린 시간~~
+- ~~정상 흐름과 예외 흐름 구분~~
+  - ~~예외 발생시 예외 정보가 남아야 함~~
+- 메서드 호출의 깊이 표현
+- HTTP 요청을 구분
+  - HTTP 요청 단위로 특정 ID를 남겨서 어떤 HTTP 요청에서 시작된 것인지 명확하게 구분이 가능해야 함
+  - 트랜잭션 ID (DB 트랜잭션X), 여기서는 하나의 HTTP 요청이 시작해서 끝날 때 까지를 하나의 트랜잭션이라 함
+
+아직 구현하지 못한 요구사항은 메서드 호출의 깊이를 표현하고, 같은 HTTP 요청이면 같은 트랜잭션 ID를 남기는 것이다. 이 기능은 직전 로그의 깊이와 트랜잭션 ID가 무엇인지 알아야 할 수 있는 일이다. 예를 들어서 `OrderController.request()` 에서 로그를 남길 때 어떤 깊이와 어떤 트랜잭션 ID를 사용했는지를 그 다음에 로그를 남기는 `OrderService.orderItem()` 에서 로그를 남길 때 알아야 한다. 결국 현재 로그의 상태 정보인 트랜잭션 ID와 level이 다음으로 전달되어야 한다.
+
+<u>정리하자면 로그에 대한 문맥(Context) 정보가 필요하다.</u>
 
 
 
