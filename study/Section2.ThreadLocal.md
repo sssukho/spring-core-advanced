@@ -176,3 +176,156 @@ class FieldLogTraceTest {
 
 이제 불필요하게 TraceId 를 파라미터로 전달하지 않아도 되고, 애플리케이션의 메서드 파라미터도 변경하지 않아도 된다.
 
+
+
+## 필드 동기화 - 적용
+
+지금까지 만든 FieldLogTrace를 애플리케이션에 적용해보자.
+
+
+
+### LogTrace 스프링 빈 등록
+
+FieldLogTrace 를 수동으로 스프링 빈으로 등록하자. 수동으로 등록하면 향후 구현체를 편리하게 변경할 수 있다는 장점이 있다.
+
+``` java
+package hello.advanced;
+
+import hello.advanced.trace.logtrace.FieldLogTrace;
+import hello.advanced.trace.logtrace.LogTrace;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class LogTraceConfig {
+
+    @Bean
+    public LogTrace logTrace() {
+        return new FieldLogTrace();
+    }
+}
+```
+
+
+
+### v2 -> v3 복사
+
+로그 추적기 V3를 적용하기 전에 먼저 기존 코드를 복사하자. (소스코드 참고)
+
+- OrderControllerV3
+
+  ``` java
+  package hello.advanced.app.v3;
+  
+  import hello.advanced.trace.TraceStatus;
+  import hello.advanced.trace.hellotrace.HelloTraceV2;
+  import hello.advanced.trace.logtrace.LogTrace;
+  import lombok.RequiredArgsConstructor;
+  import org.springframework.web.bind.annotation.GetMapping;
+  import org.springframework.web.bind.annotation.RestController;
+  
+  @RestController
+  @RequiredArgsConstructor
+  public class OrderControllerV3 {
+  
+      private final OrderServiceV3 orderService;
+      private final LogTrace trace;
+  
+      @GetMapping("/v3/request")
+      public String request(String itemId) {
+          TraceStatus status = null;
+          try {
+              status = trace.begin("OrderController.request()");
+              orderService.orderItem(status.getTraceId(), itemId);
+              trace.end(status);
+              return "ok";
+          } catch (Exception e) {
+              trace.exception(status, e);
+              throw e;
+          }
+      }
+  }
+  ```
+
+- OrderServiceV3
+
+  ``` java
+  package hello.advanced.app.v3;
+  
+  import hello.advanced.trace.TraceId;
+  import hello.advanced.trace.TraceStatus;
+  import hello.advanced.trace.hellotrace.HelloTraceV2;
+  import hello.advanced.trace.logtrace.LogTrace;
+  import lombok.RequiredArgsConstructor;
+  import org.springframework.stereotype.Service;
+  
+  @Service
+  @RequiredArgsConstructor
+  public class OrderServiceV3 {
+  
+      private final OrderRepositoryV3 orderRepository;
+      private final LogTrace trace;
+  
+      public void orderItem(TraceId traceId, String itemId) {
+          TraceStatus status = null;
+          try {
+              status = trace.begin("OrderService.orderItem()");
+              orderRepository.save(status.getTraceId(), itemId);
+              trace.end(status);
+          } catch (Exception e) {
+              trace.exception(status, e);
+              throw e;
+          }
+      }
+  }
+  ```
+
+- OrderRepositoryV3
+
+  ``` java
+  package hello.advanced.app.v3;
+  
+  import hello.advanced.trace.TraceId;
+  import hello.advanced.trace.TraceStatus;
+  import hello.advanced.trace.hellotrace.HelloTraceV2;
+  import hello.advanced.trace.logtrace.LogTrace;
+  import lombok.RequiredArgsConstructor;
+  import org.springframework.stereotype.Repository;
+  
+  @Repository
+  @RequiredArgsConstructor
+  public class OrderRepositoryV3 {
+  
+      private final LogTrace trace;
+  
+      public void save(TraceId traceId, String itemId) {
+  
+          TraceStatus status = null;
+          try {
+              status = trace.begin("OrderService.orderItem()");
+              // 저장 로직
+              if (itemId.equals("ex")) {
+                  throw new IllegalStateException("예외 발생!");
+              }
+              sleep(1000);
+              trace.end(status);
+          } catch (Exception e) {
+              trace.exception(status, e);
+              throw e;
+          }
+      }
+  
+      private void sleep(int millis) {
+          try {
+              Thread.sleep(millis);
+          } catch (InterruptedException e) {
+              e.printStackTrace();
+          }
+      }
+  }
+  ```
+
+
+
+
+
