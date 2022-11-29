@@ -327,5 +327,69 @@ public class LogTraceConfig {
 
 
 
+## 필드 동기화 - 동시성 문제
+
+### 동시성 문제 확인
+
+다음 로직을 1초 안에 2번 호출해보자.
+
+- http://localhost:8080/v3/request?itemId=hello
+
+- http://localhost:8080/v3/request?itemId=hello
+
+- 기대결과
+
+  ```
+  [nio-8080-exec-3] [52808e46] OrderController.request()
+  [nio-8080-exec-3] [52808e46] |-->OrderService.orderItem()
+  [nio-8080-exec-3] [52808e46] |   |-->OrderRepository.save()
+  [nio-8080-exec-4] [4568423c] OrderController.request()
+  [nio-8080-exec-4] [4568423c] |-->OrderService.orderItem()
+  [nio-8080-exec-4] [4568423c] |   |-->OrderRepository.save()
+  [nio-8080-exec-3] [52808e46] |   |<--OrderRepository.save() time=1001ms
+  [nio-8080-exec-3] [52808e46] |<--OrderService.orderItem() time=1001ms
+  [nio-8080-exec-3] [52808e46] OrderController.request() time=1003ms
+  [nio-8080-exec-4] [4568423c] |   |<--OrderRepository.save() time=1000ms
+  [nio-8080-exec-4] [4568423c] |<--OrderService.orderItem() time=1001ms
+  [nio-8080-exec-4] [4568423c] OrderController.request() time=1001ms
+  ```
+
+- 실제 결과
+
+  ```
+  [nio-8080-exec-1] [cb3fdfb0] OrderController.request()
+  [nio-8080-exec-1] [cb3fdfb0] |-->OrderService.orderItem()
+  [nio-8080-exec-1] [cb3fdfb0] |   |-->OrderService.orderItem()
+  [nio-8080-exec-2] [cb3fdfb0] |   |   |-->OrderController.request()
+  [nio-8080-exec-2] [cb3fdfb0] |   |   |   |-->OrderService.orderItem()
+  [nio-8080-exec-2] [cb3fdfb0] |   |   |   |   |-->OrderService.orderItem()
+  [nio-8080-exec-1] [cb3fdfb0] |   |<--OrderService.orderItem() time=1000ms
+  [nio-8080-exec-1] [cb3fdfb0] |<--OrderService.orderItem() time=1003ms
+  [nio-8080-exec-1] [cb3fdfb0] OrderController.request() time=1003ms
+  [nio-8080-exec-2] [cb3fdfb0] |   |   |   |   |<--OrderService.orderItem() time=1004ms
+  [nio-8080-exec-2] [cb3fdfb0] |   |   |   |<--OrderService.orderItem() time=1005ms
+  [nio-8080-exec-2] [cb3fdfb0] |   |   |<--OrderController.request() time=1005ms
+  ```
+
+- 기대한 것과는 다르게 트랜잭션ID 도 동일하고, level도 뭔가 많이 꼬인듯이 로그가 찍힌다. 분명히 테스트 코드로 작성할 때는 문제가 없었는데 무엇이 문제일까?
+
+
+
+### 동시성 문제
+
+사실 이 문제는 동시성 문제이다.
+
+`FieldLogTrace` 는 싱글톤으로 등록된 스프링 빈이다. 이 객체의 인스턴스가 애플리케이션에 딱 1개 존재한다는 뜻이다. 이렇게 하나만 있는 인스턴스의 FieldlogTrace.traceIdHolder 필드를 여러 쓰레드가 동시에 접근하기 때문에 문제가 발생한다.
+
+
+
+
+
+
+
+
+
+
+
 
 
