@@ -30,7 +30,7 @@ public class FieldServiceTest {
         // sleep(100); // 동시성 문제 발생O
         threadB.start();; // B 실행
 
-        sleep(3000);
+        sleep(3000); // 메인 쓰레드 종료 대기
         log.info("main exit");
     }
 
