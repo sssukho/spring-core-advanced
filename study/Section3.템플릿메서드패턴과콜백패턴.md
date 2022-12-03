@@ -988,3 +988,342 @@ void strategyV3() {
 
 
 
+## 템플릿 콜백 패턴 - 시작
+
+`ContextV2` 는 변하지 않는 템플릿 역할을 한다. 그리고 변하는 부분은 파라미터로 넘어온 Strategy 코드를 실행해서 처리한다. 이렇게 다른 코드의 인수로서 넘겨주는 실행 가능한 코드를 콜백(callback) 이라 한다.
+
+> [콜백 정의]
+>
+> 프로그래밍에서 콜백 또는 콜애프터 함수 는 다른 코드의 인수로서 넘겨주는 실행 가능한 코드를 말한다. 콜백을 넘겨받는 코드는 이 콜백을 필요에 따라 즉시 실행할 수도 있고, 아니면 나중에 실행할 수도 있다. - 위키백과
+
+쉽게 이야기해서 callback은 코드가 호출(call)은 되는데 코드를 넘겨준 곳의 뒤(back) 에서 실행된다는 뜻이다.
+
+- `ContextV2` 에서 콜백은 `Strategy` 이다.
+- 여기에서는 클라이언트에서 직접 Strategy 를 실행하는 것이 아니라, 클라이언트가 `Contextv2.execute(..)` 를 실행할 때 Strategy를 넘겨주고, ContextV2 뒤에서 Strategy가 실행된다.
+
+
+
+### 자바 언어에서 콜백
+
+- 자바 언어에서 실행 가능한 코드를 인수로 넘기려면 객체가 필요하다. 자바 8부터는 람다를 사용할 수 있다.
+- 자바 8 이전에는 보통 하나의 메소드를 가진 인터페이스를 구현하고, 주로 익명 내부 클래스를 사용했다.
+- 최근에는 주로 람다를 사용한다.
+
+
+
+### 템플릿 콜백 패턴
+
+- 스프링에서는 `ContextV2` 와 같은 방식의 전략 패턴을 템플릿 콜백 패턴이라 한다. 전략 패턴에서 `Context` 가 템플릿 역할을 하고, `Strategy` 부분이 콜백으로 넘어온다 생각하면 된다.
+- **참고로 템플릿 콜백 패턴은 GOF 패턴은 아니고, 스프링 내부에서 이런 방식을 자주 사용하기 떄문에 스프링 안에서만 이렇게 부른다. 전략 패턴에서 템플릿과 콜백 부분이 강조된 패턴이라 생각하면 된다.**
+- 스프링에서는 JdbcTemplate, RestTempalte, TransactionTemplate, RedisTemplate 처럼 다양한 템플릿 콜백 패턴이 사용된다. 스프링에서 이름에 `XXXTemplate` 가 있다면 템플릿 콜백 패턴으로 만들어져 있다 생각하면 된다.
+
+
+
+![3-7](./img/3-7.png)
+
+
+
+
+
+## 템플릿 콜백 패턴 - 예제
+
+템플릿 콜백 패턴을 구현해보자. `ContextV2`와 내용이 같고 이름만 다르므로 크게 어려움은 없을 것이다.
+
+- `Context` -> `Template`
+- `Strategy` -> `Callback`
+
+
+
+### Callback - 인터페이스 (테스트 코드 하위)
+
+``` java
+package hello.advanced.trace.strategy.code.template;
+
+public interface Callback {
+  void call();
+}
+```
+
+콜백 로직을 전달할 인터페이스다.
+
+
+
+### TimeLogTemplate (테스트 코드 하위)
+
+``` java
+package hello.advanced.trace.strategy.code.template;
+
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+public class TimeLogTemplate {
+    public void execute(Callback callback) {
+        long startTime = System.currentTimeMillis();
+        // 비즈니스 로직 실행
+        callback.call();
+        // 비즈니스 로직 종료
+        long endTime = System.currentTimeMillis();
+        long resultTime = endTime - startTime;
+        log.info("resultTime={}", resultTime);
+    }
+}
+
+```
+
+
+
+### TemplateCallbackTest
+
+``` java
+package hello.advanced.trace.strategy;
+
+import hello.advanced.trace.strategy.code.template.Callback;
+import hello.advanced.trace.strategy.code.template.TimeLogTemplate;
+import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Test;
+
+@Slf4j
+public class TemplateCallbackTest {
+  
+  /**
+   * 템플릿 콜백 패턴 - 익명 내부 클래스
+   */
+  @Test
+  void callbackV1() {
+    TimeLogTempalte template = new TimeLogTemplate();
+    
+    template.exceute(new Callback() {
+      @Override
+      public void call() {
+        log.info("비즈니스 로직1 실행");
+      }
+    });
+    
+    template.exceute(new Callback() {
+      @Override
+      public void call() {
+        log.info("비즈니스 로직2 실행");
+      }
+    });
+  }
+  
+  /**
+   * 템플릿 콜백 패턴 - 람다
+   */
+  @Test
+  void callbackV2() {
+    TimeLogTemplate template = new TimeLogTemplate();
+    template.execute(() -> log.info("비즈니스 로직1 실행"));
+    template.execute(() -> log.info("비즈니스 로직2 실행"));
+  }
+}
+```
+
+별도의 클래스를 만들어서 전달해도 되지만, 콜백을 사용할 경우 익명 내부 클래스나 람다를 사용하는 것이 편리하다.
+
+물론 여러곳에서 함께 사용되는 경우 재사용을 위해 콜백을 별도의 클래스로 만들어도 된다.
+
+
+
+## 템플릿 콜백 패턴 - 적용
+
+이제 템플릿 콜백 패턴을 애플리케이션에 적용해보자.
+
+### TraceCallback 인터페이스
+
+``` java
+package hello.advanced.trace.callback;
+
+public interface TraceCallback<T> {
+    T call();
+}
+```
+
+- 콜백을 전달하는 인터페이스다.
+- `<T>` 제네릭을 사용했다. 콜백의 반환 타입을 정의했다.
+
+
+
+### TraceTemplate
+
+``` java
+package hello.advanced.trace.callback;
+
+import hello.advanced.trace.TraceStatus;
+import hello.advanced.trace.logtrace.LogTrace;
+
+public class TraceTemplate {
+    
+    private final LogTrace trace;
+
+    public TraceTemplate(LogTrace trace) {
+        this.trace = trace;
+    }
+
+    public <T> T execute(String message, TraceCallback<T> callback) {
+        TraceStatus status = null;
+        try {
+            status = trace.begin(message);
+            // 로직 호출
+            T result = callback.call();
+            trace.end(status);
+            return result;
+        } catch (Exception e) {
+            trace.exception(status, e);
+            throw e;
+        }
+    }
+}
+```
+
+- `TraceTemplate` 는 템플릿 역할을 한다.
+- `execute(..)` 를 보면 `message` 데이터와 콜백인 `TraceCallback callback` 을 전달 받는다.
+- `<T>` 제네릭을 사용했다. 반환 타입을 정의한다.
+
+
+
+### OrderControllerV5
+
+``` java
+package hello.advanced.app.v5;
+
+import hello.advanced.trace.callback.TraceCallback;
+import hello.advanced.trace.callback.TraceTemplate;
+import hello.advanced.trace.logtrace.LogTrace;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class OrderControllerV5 {
+
+    private final OrderServiceV5 orderService;
+    private final TraceTemplate template;
+
+    public OrderControllerV5(OrderServiceV5 orderService, LogTrace trace) {
+        this.orderService = orderService;
+        this.template = new TraceTemplate(trace);
+    }
+
+    @GetMapping("/v5/request")
+    public String request(String itemId) {
+        return template.execute("OrderController.request()", new TraceCallback<>() {
+            @Override
+            public String call() {
+                orderService.orderItem(itemId);
+                return "ok";
+            }
+        });
+    }
+}
+```
+
+- `this.template = new TraceTemplate(trace)` : trace 의존관계 주입을 받으면서 필요한 TraceTemplate 템플릿을 생성한다. 참고로 TraceTemplate 를 처음부터 스프링 빈으로 등록하고 주입받아도 된다. 이 부분은 선택이다.
+
+
+
+### OrderServiceV5
+
+``` java
+package hello.advanced.app.v5;
+
+import hello.advanced.trace.callback.TraceTemplate;
+import hello.advanced.trace.logtrace.LogTrace;
+import hello.advanced.trace.template.AbstractTemplate;
+import org.springframework.stereotype.Service;
+
+@Service
+public class OrderServiceV5 {
+
+    private final OrderRepositoryV5 orderRepository;
+    private final TraceTemplate template;
+
+    public OrderServiceV5(OrderRepositoryV5 orderRepository, LogTrace trace) {
+        this.orderRepository = orderRepository;
+        this.template = new TraceTemplate(trace);
+    }
+
+    public void orderItem(String itemId) {
+        template.execute("OrderService.request()", () -> {
+            orderRepository.save(itemId);
+            return null;
+        });
+    }
+}
+```
+
+- `template.execute(.., new TraceCallback(){..})`: 템플릿을 실행하면서 콜백을 전달한다. 여기서는 콜백으로 람다를 전달했다.
+
+
+
+### OrderRepositoryV5
+
+``` java
+package hello.advanced.app.v5;
+
+import hello.advanced.trace.callback.TraceTemplate;
+import hello.advanced.trace.logtrace.LogTrace;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public class OrderRepositoryV5 {
+    
+    private final TraceTemplate template;
+
+    public OrderRepositoryV5(LogTrace trace) {
+        this.template = new TraceTemplate(trace);
+    }
+
+    public void save(String itemId) {
+        template.execute("OrderRepository.save()", () -> {
+           // 저장 로직
+            if (itemId.equals("ex")) {
+                throw new IllegalStateException("예외 발생!");
+            }
+            sleep(1000);
+            return null;
+        });
+    }
+
+    private void sleep(int millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+- 정상 실행: http://localhost:8080/v5/request?itemId=hello
+
+- 결과
+
+  ```
+  [aaaaaaaa] OrderController.request()
+  [aaaaaaaa] |-->OrderService.orderItem()
+  [aaaaaaaa] |   |-->OrderRepository.save()
+  [aaaaaaaa] |   |<--OrderRepository.save() time=1001ms
+  [aaaaaaaa] |<--OrderService.orderItem() time=1003ms
+  [aaaaaaaa] OrderController.request() time=1004ms
+  ```
+
+
+
+### 정리
+
+지금까지 우리는 변하는 코드와 변하지 않는 코드를 분리하고, 더 적은 코드로 로그 추적기를 적용하기 위해 고군분투 했다.
+
+템플릿 메서드 패턴, 전략 패턴, 그리고 템플릿 콜백 패턴까지 진행하면서 변하는 코드와 변하지 않는 코드를 분리했다. 그리고 최종적으로 템플릿 콜백 패턴을 적용하고 콜백으로 람다를 사용해서 코드 사용도 최소화 할 수 있었다.
+
+- 한계
+  - 그런데 지금까지 설명한 방식의 한계는 아무리 최적화를 해도 결국 로그 추적기를 적용하기 위해서 원본 코드를 수정해야 한다는 점이다. 클래스가 수백개이면 수백개를 더 힘들게 수정하는가 조금 덜 힘들게 수정하는가의 차이가 있을 뿐, 본질적으로 코드를 다 수정해야 하는 것은 마찬가지다.
+
+
+
+개발자의 게으름에 대한 욕심은 끝이 없다. 수많은 개발자가 이문제에 대해서 집요하게 고민해왔고, 여러가지 방향으로 해결책을 만들어왔다. 지금부터 원본 코드를 손대지 않고 로그 추적기를 적용할 수 있는 방법을 알ㅇ바ㅗ자. 그러기 위해서 프록시 개념을 먼저 이해해야 한다.
+
+
+
+> [참고]
+>
+> 지금까지 설명한 방식은 실제 스프링 안에서 많이 사용되는 방식이다. `XXXTemplate` 를 만나면 이번에 학습한 내용을 떠올려보면 어떻게 돌아가는지 쉽게 이해할 수 있을 것이다.
