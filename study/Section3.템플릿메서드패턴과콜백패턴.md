@@ -733,19 +733,256 @@ void strategyV1() {
 
 
 
+## 전략 패턴 - 예제2
+
+전략 패턴도 익명 내부 클래스를 사용할 수 있다.
+
+### ContextV1Test - 추가
+
+``` java
+/**
+* 전략 패턴 익명 내부 클래스1
+*/
+@Test
+void strategyV2() {
+  Strategy strategyLogic1 = new Strategy() {
+    @Override
+    public void call() {
+      log.info("비즈니스 로직1 실행");
+    }
+  };
+
+  log.info("strategyLogic1={}", strategyLogic1.getClass());
+  ContextV1 context1 = new ContextV1(strategyLogic1);
+  context1.execute();
+
+  Strategy strategyLogic2 = new Strategy() {
+    @Override
+    public void call() {
+      log.info("비즈니스 로직2 실행");
+    }
+  };
+
+  log.info("strategyLogic2={}", strategyLogic2.getClass());
+  ContextV1 context2 = new ContextV1(strategyLogic2);
+  context2.execute();
+}
+```
+
+```
+## 실행결과
+
+ContextV1Test - strategyLogic1=class hello.advanced.trace.strategy.ContextV1Test$1 ContextV1Test - 비즈니스 로직1 실행
+ContextV1 - resultTime=0
+ContextV1Test - strategyLogic2=class hello.advanced.trace.strategy.ContextV1Test$2 ContextV1Test - 비즈니스 로직2 실행
+ContextV1 - resultTime=0
+```
+
+실행 결과를 보면 `ContextV1Test$1`, `ContextV1Test$2` 와 같이 익명 내부 클래스가 생성된 것을 확인할 수 있다.
 
 
 
+### ContextV1Test - 추가
+
+``` java
+/**
+* 전략 패턴 익명 내부 클래스2
+*/
+@Test
+void strategyV3() {
+  ContextV1 context1 = new ContextV1(new Strategy() {
+    @Override
+    public void call() {
+      log.info("비즈니스 로직1 실행");
+    }
+  });
+  context1.execute();
+
+  ContextV1 context2 = new ContextV1(new Strategy() {
+    @Override
+    public void call() {
+      log.info("비즈니스 로직2 실행");
+    }
+  });
+  context2.execute();
+}
+```
+
+익명 내부 클래스를 변수에 담아두지 말고, 생성하면서 바로 ContextV1에 전달해도 된다.
 
 
 
+### ContextV1Test - 추가
+
+``` java
+/**
+* 전략 패턴, 람다
+*/
+@Test
+void strategyV4() {
+  ContextV1 context1 = new ContextV1(() -> log.info("비즈니스 로직1 실행"));
+  context1.execute();
+  ContextV1 context2 = new ContextV1(() -> log.info("비즈니스 로직2 실행"));
+  context2.execute();
+}
+```
+
+익명 내부 클래스를 자바8부터 제공하는 람다로 변경할 수 있다. 람다로 변경하려면 인터페이스에 메서드가 1개만 있으면 되는데, 여기에서 제공하는 Strategy 인터페이스는 메서드가 1개만 있으므로 람다로 사용할 수 있다.
 
 
 
+### 정리
+
+지금까지 일반적으로 이야기하는 전략 패턴에 대해서 알아보았다. 변하지 않는 부분을 `Context` 에 두고 변하는 부분을 `Strategy` 를 구현해서 만든다. 그리고 Context 의 내부 필드에 Strategy 를 주입해서 사용했다.
 
 
 
+### 선 조립 후 실행
 
+여기서 이야기하고 싶은 부분은 Context 의 내부 필드에 Streategy 를 두고 사용하는 부분이다. 이 방식은 Context와 Strategy를 실행 전에 원하는 모양으로 조립해두고, 그 다음에 Context 를 실행하는 선 조립, 후 실행 방식에서 매우 유용하다.
+
+Context와 Strategy 를 한번 조립하고 나면 이후로는 Context 를 실행하기만 하면 된다. 우리가 스프링으로 애플리케이션을 개발할 때 애플리케이션 로딩 시점에 의존관계 주입을 통해 필요한 의존관계를 모두 맺어두고 난 다음에 실제 요청을 처리하는 것과 같은 원리이다.
+
+이 방식의 단점은 Context와 Strategy를 조립한 이후에는 전략을 변경하기가 번거롭다는 점이다. 물론 Context에 Setter 를 제공해서 Strategy를 넘겨 받아 변경하면 되지만, Context를 싱글톤으로 사용할 때는 동시성 이슈 등 고려할 점이 많다. 그래서 전략을 실시간으로 변경해야 하면 차라리 이전에 개발한 테스트 코드처럼 Context를 하나 더 생성하고 그곳에 다른 Strategy 를 주입하는 것이 더 나은 선택일 수 있다.
+
+혹시 더 유연하게 전략 패턴을 사용하는 방법은 없을까?
+
+
+
+## 전략 패턴 - 예제3
+
+이번에는 전략 패턴을 조금 다르게 사용해보자. 이전에는 Context의 필드에 Srategy를 주입해서 사용했다. 이번에는 전략을 실행할 때 직접 파라미터로 전달해서 사용해보자.
+
+
+
+### ContextV2 (테스트 코드 하위)
+
+``` java
+package hello.advanced.trace.strategy.code.strategy;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * 전략을 파라미터로 전달 받는 방식
+ */
+@Slf4j
+public class ContextV2 {
+    public void execute(Strategy strategy) {
+        long startTime = System.currentTimeMillis();
+        // 비즈니스 로직 실행
+        strategy.call(); // 위임
+        // 비즈니스 로직 종료
+        long endTime = System.currentTimeMillis(); 
+        long resultTime = endTime - startTime; 
+        log.info("resultTime={}", resultTime);
+    }
+}
+```
+
+`ContextV2` 는 전략을 필드로 가지지 않는다. 대신에 전략을 execute(..) 가 호출될 때 마다 항상 파라미터로 전달 받는다.
+
+
+
+### ContextV2Test
+
+``` java
+package hello.advanced.trace.strategy.code.strategy;
+
+import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Test;
+
+@Slf4j
+public class ContextV2Test {
+    /**
+     * 전략 패턴 적용
+     */
+    @Test
+    void strategyV1() {
+        ContextV2 context = new ContextV2();
+        context.execute(new StrategyLogic1());
+        context.execute(new StrategyLogic2());
+    }
+}
+```
+
+Context와 Strategy 를 '선 조립 후 실행' 하는 방식이 아니라 Context를 실행할 때 마다 전략을 인수로 전달한다.
+
+클라이언트는 Context를 실행하는 시점에 원하는 Strategy 를 전달할 수 있다. 따라서 이전 방식과 비교해서 원하는 전략을 더욱 유연하게 변경할 수 있다.
+
+테스트 코드를 보면 하나의 Context 만 생성한다. 그리고 하나의 Context에 실행 시점에 여러 전략을 인수로 전달해서 유연하게 실행하는 것을 확인할 수 있다.
+
+
+
+![3-6](./img/3-6.png)
+
+
+
+### ContextV2Test - 추가
+
+``` java
+/**
+* 전략 패턴 익명 내부 클래스
+*/
+@Test
+void strategyV2() {
+  ContextV2 context = new ContextV2();
+  context.execute(new Strategy() {
+    @Override
+    public void call() {
+      log.info("비즈니스 로직1 실행");
+    }
+  });
+  context.execute(new Strategy() {
+    @Override
+    public void call() {
+      log.info("비즈니스 로직2 실행");
+    }
+  });
+}
+```
+
+여기도 물론 익명 내부 클래스를 사용할 수 있다. 코드 조각을 파라미터로 넘긴다고 생각하면 더 자연스럽다.
+
+
+
+### ContextV2Test - 추가
+
+``` java
+/**
+ * 전략 패턴 익명 내부 클래스2, 람다
+ */
+@Test
+void strategyV3() {
+  ContextV2 context = new ContextV2();
+  context.execute(() -> log.info("비즈니스 로직1 실행"));
+  context.execute(() -> log.info("비즈니스 로직2 실행"));
+}
+```
+
+람다를 사용해서 코드를 더 단순하게 만들 수 있다.
+
+
+
+### 정리
+
+- `ContextV1` 은 필드에 `Strategy` 를 저장하는 방식으로 전략 패턴을 구사했다.
+  - 선 조립 후 실행 방법에 적합하다
+  - Context 를 실행하는 시점에는 이미 조립이 끝났기 때문에 전략을 신경쓰지 않고 단순히 실행만 하면 된다.
+- `ContextV2` 는 파라미터에 `Strategy` 를 전달받는 방식으로 전략 패턴을 구사했다.
+  - 실행할 떄마다 전략을 유연하게 변경할 수 있다.
+  - 단점 역시 실행할 때 마다 전략을 계속 지정해주어야 한다는 점이다.
+
+
+
+### 템플릿
+
+지금 우리가 해결하고 싶은 문제는 변하는 부분과 변하지 않는 부분을 분리하는 것이다.
+
+변하지 않는 부분을 템플릿이라고 하고, 그 템플릿 안에서 변하는 부분에 약간 다른 코드 조각을 넘겨서 실행하는 것이 목적이다.
+
+`ContextV1`, `ContextV2` 두 가지 방식 다 문제를 해결할 수 있지만, 어떤 방식이 조금 더 나아 보이는가? 지금 우리가 원하는 것은 애플리케이션 의존 관계를 설정하는 것처럼 선 조립, 후 실행이 아니다. 단순히 코드를 실행할 때 변하지 않는 템플릿이 있고, 그 템플릿 안에서 원하는 부분만 살짝 다른 코드를 실행하고 싶을 뿐이다.
+
+따라서 우리가 고민하는 문제는 실행 시점에 유연하게 실행 코드 조각을 전달하는 ContextV2 가 더 적합하다.
 
 
 
