@@ -213,7 +213,7 @@ public class ProxyApplication {
 }
 ```
 
-- `@Import(AppV1Config.class)` : 클래스를 스프링 빈으로 등록한다. 여기서는 `AppV1Config.class` 를 스프링 빈으로 등록한다. 일반적으로 `@Configuration` 같은 설정파일을 등록할 때 사용하지만, 스프링 빈을 등록할 떄도 사용할 수 있다.
+- `@Import(AppV1Config.class)` : 클래스를 스프링 빈으로 등록한다. 여기서는 `AppV1Config.class` 를 스프링 빈으로 등록한다. 일반적으로 `@Configuration` 같은 설정파일을 등록할 때 사용하지만, 스프링 빈을 등록할 때도 사용할 수 있다.
 - `@SpringBootApplication(scanBasePackages = "hello.proxy.app")` : `@ComponentScan` 의 기능과 같다. 컴포넌트 스캔을 시작할 위치를 지정한다. 이 값을 설정하면 해당 패키지와 그 하위 패키지를 컴포넌트 스캔한다. 이 값을 사용하지 않으면 ProxyApplication 이 있는 패키지와 그 하위 패키지를 스캔한다. 참고로 V3 에서 지금 설정한 컴포넌트 스캔 기능을 사용한다.
 
 > [주의]
@@ -223,3 +223,251 @@ public class ProxyApplication {
 > `@Confgiuration` 은 내부에 @Component 어노테이션을 포함하고 있어서 컴포넌트 스캔의 대상이 된다. 따라서 컴포넌트 스캔에 의해 hello.proxy.config 위치의 설정 파일들이 스프링 빈으로 자동 등록 되지 않도록 컴포넌트 스캔의 시작 위치를 `scanBasePackages=hello.proxy.app` 으로 설정해야 한다.
 
 - 실행: http://localhost:8080/v1/request?itemId=hello
+
+
+
+## 예제 프로젝트 만들기 v2
+
+### v2 - 인터페이스 없는 구체 클래스 - 스프링 빈으로 수동 등록
+
+이번에는 인터페이스가 없는 Controller, Service, Repository 를 스프링 빈으로 수동 등록해보자.
+
+
+
+#### OrderRepositoryV2
+
+``` java
+package hello.proxy.app.v2;
+
+public class OrderRepositoryV2 {
+    public void save(String itemId) {
+        // 저장 로직
+        if (itemId.equals("ex")) {
+            throw new IllegalStateException("예외 발생!");
+        }
+        sleep(1000);
+    }
+    
+    private void sleep(int millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+
+
+#### OrderServiceV2
+
+``` java
+package hello.proxy.app.v2;
+
+public class OrderServiceV2 {
+
+    private final OrderRepositoryV2 orderRepository;
+
+    public OrderServiceV2(OrderRepositoryV2 orderRepository) {
+        this.orderRepository = orderRepository;
+    }
+
+    public void orderItem(String itemId) {
+        orderRepository.save(itemId);
+    }
+}
+```
+
+
+
+#### OrderControllerV2
+
+``` java
+package hello.proxy.app.v2;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+@Slf4j
+@RequestMapping
+@ResponseBody
+public class OrderControllerV2 {
+
+    private final OrderServiceV2 orderService;
+
+    public OrderControllerV2(OrderServiceV2 orderService) {
+        this.orderService = orderService;
+    }
+
+    @GetMapping("/v2/request")
+    public String request(String itemId) {
+        orderService.orderItem(itemId);
+        return "ok";
+    }
+
+    @GetMapping("/v2/no-log")
+    public String noLog() {
+        return "ok";
+    }
+}
+```
+
+- `@RequestMapping` : 스프링MVC는 타입에 @Controller 또는 @RequestMapping 어노테이션이 있어야 스프링 컨트롤러로 인식된다. 그런데 여기서는 @RequestMapping 을 사용하였는데, @Controller 를 사용하게 되면 자동 컴포넌트 스캔의 대상이 되기 때문이다. 여기서는 컴포넌트 스캔을 통한 자동 빈 등록이 아니라 수동 빈 등록을 하는 것이 목표다. 따라서 컴포넌트 스캔과 관계 없는 @RequestMapping 를 타입에 사용했다.
+
+
+
+#### AppV2Config
+
+``` java
+package hello.proxy.config;
+
+import hello.proxy.app.v2.OrderControllerV2;
+import hello.proxy.app.v2.OrderRepositoryV2;
+import hello.proxy.app.v2.OrderServiceV2;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class AppV2Config {
+
+    @Bean
+    public OrderControllerV2 orderControllerV2() {
+        return new OrderControllerV2(orderServiceV2());
+    }
+
+    @Bean
+    public OrderServiceV2 orderServiceV2() {
+        return new OrderServiceV2(orderRepositoryV2());
+    }
+
+    @Bean
+    public OrderRepositoryV2 orderRepositoryV2() {
+        return new OrderRepositoryV2();
+    }
+}
+```
+
+
+
+#### ProxyApplication
+
+``` java
+package hello.proxy;
+
+import hello.proxy.config.AppV1Config;
+import hello.proxy.config.AppV2Config;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Import;
+
+@Import({AppV1Config.class, AppV2Config.class})
+@SpringBootApplication(scanBasePackages = "hello.proxy.app") // 주의
+public class ProxyApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(ProxyApplication.class, args);
+	}
+}
+```
+
+
+
+## 예제 프로젝트 만들기 v3
+
+### v3 - 컴포넌트 스캔으로 스프링 빈 자동 등록
+
+#### OrderRepositoryV3
+
+``` java
+package hello.proxy.app.v3;
+
+import org.springframework.stereotype.Repository;
+
+@Repository
+public class OrderRepositoryV3 {
+
+    public void save(String itemId) {
+        // 저장 로직
+        if (itemId.equals("ex")) {
+            throw new IllegalStateException("예외 발생");
+        }
+        sleep(1000);
+    }
+
+    private void sleep(int millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+
+
+#### OrderServiceV3
+
+``` java
+package hello.proxy.app.v3;
+
+import org.springframework.stereotype.Service;
+
+@Service
+public class OrderServiceV3 {
+
+    private final OrderRepositoryV3 orderRepository;
+
+    public OrderServiceV3(OrderRepositoryV3 orderRepository) {
+        this.orderRepository = orderRepository;
+    }
+
+    public void orderItem(String itemId) {
+        orderRepository.save(itemId);
+    }
+}
+```
+
+
+
+#### OrderControllerV3
+
+``` java
+package hello.proxy.app.v3;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@Slf4j
+@RestController
+public class OrderControllerV3 {
+
+    private final OrderServiceV3 orderService;
+
+    public OrderControllerV3(OrderServiceV3 orderService) {
+        this.orderService = orderService;
+    }
+
+    @GetMapping("/v3/request")
+    public String request(String itemId) {
+        orderService.orderItem(itemId);
+        return "ok";
+    }
+
+    @GetMapping("/v3/no-log")
+    public String noLog() {
+        return "ok";
+    }
+}
+```
+
+`ProxyApplication` 에서 `@SpringBootApplication(scanBasePackages = "hello.proxy.app")` 를 사용했고, 각각 `@RestController`, `@Service`, `@Repostiory` 어노테이션을 가지고 있기 때문에 컴포넌트 스캔의 대상이 된다.
+
+
+
+
+
