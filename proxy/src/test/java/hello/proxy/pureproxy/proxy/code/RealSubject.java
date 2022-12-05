@@ -1,9 +1,9 @@
-package hello.proxy.code;
+package hello.proxy.pureproxy.proxy.code;
 
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class RealSubject implements Subject {
+public class RealSubject implements Subject{
 
     @Override
     public String operation() {
