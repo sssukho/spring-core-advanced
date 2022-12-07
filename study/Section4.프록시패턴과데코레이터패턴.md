@@ -1563,5 +1563,261 @@ TimeDecorator 종료 resultTime=1
 
 
 
+## 구체 클래스 기반 프록시 - 적용
 
+구체 클래스만 있는 V2 애플리케이션에 프록시 기능을 적용해보자.
+
+#### OrderRepositoryConcreteProxy
+
+``` java
+package hello.proxy.config.v1_proxy.concrete_proxy;
+
+import hello.proxy.app.v2.OrderRepositoryV2;
+import hello.proxy.trace.TraceStatus;
+import hello.proxy.trace.logtrace.LogTrace;
+
+public class OrderRepositoryConcreteProxy extends OrderRepositoryV2 {
+
+    private final OrderRepositoryV2 target;
+    private final LogTrace logTrace;
+
+    public OrderRepositoryConcreteProxy(OrderRepositoryV2 target, LogTrace logTrace) {
+        this.target = target;
+        this.logTrace = logTrace;
+    }
+
+    @Override
+    public void save(String itemId) {
+        TraceStatus status = null;
+
+        try {
+            status = logTrace.begin("OrderRepository.save()");
+            // target 호출
+            target.save(itemId);
+            logTrace.end(status);
+        } catch (Exception e) {
+            logTrace.exception(status, e);
+            throw e;
+        }
+    }
+}
+```
+
+인터페이스가 아닌 `OrderRepositoryV2` 클래스를 상속 받아서 프록시를 만든다.
+
+
+
+#### OrderServiceConcreteProxy
+
+``` java
+package hello.proxy.config.v1_proxy.concrete_proxy;
+
+import hello.proxy.app.v2.OrderRepositoryV2;
+import hello.proxy.app.v2.OrderServiceV2;
+import hello.proxy.trace.TraceStatus;
+import hello.proxy.trace.logtrace.LogTrace;
+
+public class OrderServiceConcreteProxy extends OrderServiceV2 {
+    
+    private final OrderServiceV2 target;
+    private final LogTrace logTrace;
+
+    public OrderServiceConcreteProxy(OrderServiceV2 target, LogTrace logTrace) {
+        super(null);
+        this.target = target;
+        this.logTrace = logTrace;
+    }
+
+    @Override
+    public void orderItem(String itemId) {
+        TraceStatus status = null;
+        try {
+            status = logTrace.begin("OrderService.orderItem()");
+            // target 호출
+            target.orderItem(itemId);
+            logTrace.end(status);
+        } catch (Exception e) {
+            logTrace.exception(status, e);
+            throw e;
+        }
+    }
+}
+```
+
+- 인터페이스가 아닌 `OrderServiceV2` 클래스를 상속 받아서 프록시를 만든다.
+
+
+
+### 클래스 기반 프록시의 단점
+
+- `super(null)` : 자바 기본 문법에 의해 자식 클래스를 생성할 때는 항상 super() 로 부모 클래스의 생성자를 호출해야 한다. 이 부분을 생략하면 기본 생성자가 호출된다. 그런데 부모 클래스인 OrderServiceV2 는 기본 생성자가 없고, 생성자에서 파라미터 1개를 필수로 받는다. 따라서 파라미터를 넣어서 super(..) 를 호출해야 한다.
+- 프록시는 부모 객체의 기능을 사용하지 않기 때문에 super(null) 을 입력해도 된다.
+- 인터페이스 기반 프록시는 이런 고민을 하지 않아도 된다.
+
+
+
+#### OrderServiceV2 의 생성자 - 참고
+
+``` java
+public OrderServiceV2(OrderRepositoryV2 orderRepository) {
+  this.orderRepository = orderRepository;
+}
+```
+
+
+
+#### OrderControllerConcreteProxy
+
+``` java
+package hello.proxy.config.v1_proxy.concrete_proxy;
+
+import hello.proxy.app.v2.OrderControllerV2;
+import hello.proxy.trace.TraceStatus;
+import hello.proxy.trace.logtrace.LogTrace;
+
+public class OrderControllerConcreteProxy extends OrderControllerV2 {
+    
+    private final OrderControllerV2 target;
+    private final LogTrace logTrace;
+
+    public OrderControllerConcreteProxy(OrderControllerV2 target, LogTrace logTrace) {
+        super(null);
+        this.target = target;
+        this.logTrace = logTrace;
+    }
+
+    @Override
+    public String request(String itemId) {
+        TraceStatus status = null;
+        try {
+            status = logTrace.begin("OrderController.request()");
+            // target 호출
+            String result = target.request(itemId);
+            logTrace.end(status);
+            return result;
+        } catch (Exception e) {
+            logTrace.exception(status, e);
+            throw e;
+        }
+    }
+}
+```
+
+
+
+#### ConcreteProxyConfig
+
+``` java
+package hello.proxy.config.v1_proxy;
+
+import hello.proxy.app.v2.OrderControllerV2;
+import hello.proxy.app.v2.OrderRepositoryV2;
+import hello.proxy.app.v2.OrderServiceV2;
+import hello.proxy.config.v1_proxy.concrete_proxy.OrderControllerConcreteProxy;
+import hello.proxy.config.v1_proxy.concrete_proxy.OrderRepositoryConcreteProxy;
+import hello.proxy.config.v1_proxy.concrete_proxy.OrderServiceConcreteProxy;
+import hello.proxy.trace.logtrace.LogTrace;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class ConcreteProxyConfig {
+
+    @Bean
+    public OrderControllerV2 orderControllerV2(LogTrace logTrace) {
+        OrderControllerV2 controllerImpl = new OrderControllerV2(orderServiceV2(logTrace));
+        return new OrderControllerConcreteProxy(controllerImpl, logTrace);
+    }
+
+    @Bean
+    public OrderServiceV2 orderServiceV2(LogTrace logTrace) {
+        OrderServiceV2 serviceImpl = new OrderServiceV2(orderRepositoryV2(logTrace));
+        return new OrderServiceConcreteProxy(serviceImpl, logTrace);
+    }
+
+    @Bean
+    public OrderRepositoryV2 orderRepositoryV2(LogTrace logTrace) {
+        OrderRepositoryV2 repositoryImpl = new OrderRepositoryV2();
+        return new OrderRepositoryConcreteProxy(repositoryImpl, logTrace);
+    }
+}
+```
+
+
+
+#### ProxyApplication
+
+``` java
+package hello.proxy;
+
+import hello.proxy.config.v1_proxy.ConcreteProxyConfig;
+import hello.proxy.config.v1_proxy.InterfaceProxyConfig;
+import hello.proxy.trace.logtrace.LogTrace;
+import hello.proxy.trace.logtrace.ThreadLocalLogTrace;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+
+//@Import({AppV1Config.class, AppV2Config.class})
+//@Import(InterfaceProxyConfig.class)
+@Import(ConcreteProxyConfig.class)
+@SpringBootApplication(scanBasePackages = "hello.proxy.app") // 주의
+public class ProxyApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(ProxyApplication.class, args);
+	}
+
+	@Bean
+	public LogTrace logTrace() {
+		return new ThreadLocalLogTrace();
+	}
+}
+```
+
+- 실행: http://localhost:8080/v2/request?itemId=hello
+
+
+
+## 인터페이스 기반 프록시와 클래스 기반 프록시
+
+### 프록시
+
+프록시를 사용한 덕분에 원본 코드를 전혀 변경하지 않고, V1, V2 애플리케이션에 LogTrace 기능을 적용할 수 있었다.
+
+
+
+### 인터페이스 기반 프록시 vs 클래스 기반 프록시
+
+- 인터페이스가 없어도 클래스 기반으로 프록시를 생성할 수 있다.
+- 클래스 기반 프록시는 해당 클래스에만 적용할 수 있다. 인터페이스 기반 프록시는 인터페이스만 같으면 모든 곳에 적용할 수 있다.
+- 클래스 기반 프록시는 상속을 사용하기 때문에 몇 가지 제약이 있다.
+  - 부모 클래스의 생성자를 호출해야 한다.
+  - 클래스에 final 키워드가 붙으면 상속이 불가능하다.
+  - 메서드에 final 키워드가 붙으면 해당 메서드를 오버라이딩 할 수 있다.
+
+이렇게 보면 인터페이스 기반의 프록시가 더 좋아보인다. 맞다. 인터페이스 기반의 프록시는 상속이라는 제약에서 자유롭다. 프로그래밍 관점에서도 인터페이스를 사용하는 것이 역할과 구현을 명확하게 나누기 때문에 더 좋다.
+
+인터페이스 기반 프록시의 단점은 인터페이스가 필요하다는 그 자체이다. 인터페이스가 없으면 인터페이스 기반 프록시를 만들 수 없다.
+
+> [참고]
+>
+> 인터페이스 기반 프록시는 캐스팅 관련해서 단점이 있는데, 이 내용은 뒷부분에...
+
+이론적으로는 모든 객체에 인터페이스를 도입해서 역할과 구현을 나누는 것이 좋다. 이렇게 하면 역할과 구현을 나눠서 구현체를 매우 편리하게 변경할 수 있다. 하지만 실제로는 구현을 거의 변경할 일이 없는 클래스도 많다.
+
+인터페이스를 도입하는 것은 구현을 변경할 가능성이 있을 때 효과적인데, 구현을 변경할 가능성이 거의 없는 코드에 무작정 인터페이스를 사용하는 것은 번거롭고 그렇게 실용적이지 않다. 이런곳에는 실용적인 관점에서 인터페이스를 사용하지 않고 구체 클래스를 바로 사용하는 것이 좋다 생각한다. (물론 인터페이스를 도입하는 다양한 이유가 있다. 여기서 핵심은 인터페이스가 항상 필요하지 않다는 것이다.)
+
+
+
+### 결론
+
+실무에서는 프록시를 적용할 때 V1 처럼 인터페이스도 있고, V2처럼 구체 클래스도 있다. 따라서 2가지 상황을 모두 대응할 수 있어야 한다.
+
+
+
+### 너무 많은 프록시 클래스
+
+지금까지 프록시를 사용해서 기존 코드를 변경하지 않고, 로그 추적기라는 부가 기능을 적용할 수 있었다. 그런데 문제는 프록시 클래스를 너무 많이 만들어야 한다는 점이다. 잘 보면 프록시 클래스가 하는 일은 LogTrace 를 사용하는 것인데, 그 로직이 모두 똑같다. 대상 클래스만 다를 뿐이다. 만약 적용해야 하는 대상 클래스가 100개라면 프록시 클래스도 100개를 만들어야 한다. 이는 바로 다음 강의인 동적 프록시 기술이 이 문제를 해결해준다.
 
