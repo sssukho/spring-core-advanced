@@ -765,3 +765,231 @@ JDK 동적 프록시는 인터페이스가 필수이다.
 
 
 
+
+
+## CGLIB - 소개
+
+### CGLIB: Code Generator Library
+
+- CGLIB는 바이트코드를 조작해서 동적으로 클래스를 생성하는 기술을 제공하는 라이브러리다.
+- CGLIB를 사용하면 인터페이스가 없어도 구체 클래스만 가지고 동적 프록시를 만들어낼 수 있다.
+- CGLIB는 원래는 외부 라이브러리인데, 스프링 프레임워크가 스프링 내부 소스 코드에 포함했다. 따라서 스프링을 사용한다면 별도의 외부 라이브러리를 추가하지 않아도 사용할 수 있다.
+
+참고로 직접 CGLIB를 직접 사용하는 경우는 거의 없다. 이후에 설명할 스프링의 `ProxyFactory` 라는 것이 이 기술을 편리하게 사용하게 도와주기 때문에 너무 깊이있게 파기 보다는 CGLIB가 무엇인지 대략 개념만 잡으면 된다.
+
+
+
+### 공통 예제 코드
+
+앞으로 다양한 상황을 설명하기 위해서 먼저 공통으로 사용할 예제 코드를 만들어보자.
+
+- 인터페이스와 구현이 있는 서비스 클래스 - `ServiceInterface`, `ServiceImpl`
+- 구체 클래스만 있는 서비스 클래스 - `ConcreteService`
+
+
+
+#### ServiceInterface (테스트 코드 하위)
+
+``` java
+package hello.proxy.common.service;
+
+public interface ServiceInterface {
+    void save();
+    
+    void find();
+}
+```
+
+
+
+#### ServiceImpl (테스트 코드 하위)
+
+``` java
+package hello.proxy.common.service;
+
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+public class ServiceImpl implements ServiceInterface{
+
+    @Override
+    public void save() {
+        log.info("save 호출");
+    }
+
+    @Override
+    public void find() {
+        log.info("find 호출");
+    }
+}
+```
+
+
+
+#### ConcreteService (테스트 코드 하위)
+
+``` java
+package hello.proxy.common.service;
+
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+public class ConcreteService {
+    public void call() {
+        log.info("ConcreteService 호출");
+    }
+}
+```
+
+
+
+## CGLIB - 예제 코드
+
+### CGLIB 코드
+
+JDK 동적 프록시에서 실행 로직을 위해 `InvocationHandler` 를 제공했듯이, CGLIB는 `MethodInterceptor` 를 제공한다.
+
+
+
+#### MethodInterceptor - CGLIB 제공
+
+``` java
+package org.springframework.cglib.proxy;
+
+public interface MethodInterceptor extends Callback {
+  Object intercept(Object obj, Method method, Object[] args, MethodProxy proxy) throws Throwable;
+}
+```
+
+- `obj`: CGLIB가 적용된 객체
+- `method`: 호출된 메소드
+- `args`: 메서드를 호출하면서 전달된 인수
+- `proxy`: 메서드 호출에 사용
+
+
+
+#### TimeMethodInterceptor (테스트 코드 하위)
+
+``` java
+package hello.proxy.cglib.code;
+
+import java.lang.reflect.Method;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cglib.proxy.MethodInterceptor;
+import org.springframework.cglib.proxy.MethodProxy;
+
+@Slf4j
+public class TimeMethodInterceptor implements MethodInterceptor {
+    
+    private final Object target;
+
+    public TimeMethodInterceptor(Object target) {
+        this.target = target;
+    }
+
+    @Override
+    public Object intercept(Object o, Method method, Object[] args, MethodProxy proxy) throws Throwable {
+        log.info("TimeProxy 실행");
+        long startTime = System.currentTimeMillis();
+
+        Object result = proxy.invoke(target, args);
+        
+        long endTime = System.currentTimeMillis();
+        long resultTime = endTime - startTime;
+        log.info("TimeProxy 종료 resultTime={}", resultTime);
+        return result;
+    }
+}
+```
+
+- `TimeMethodInterCeptor`는 `MethodInterceptor` 인터페이스를 구현해서 CGLIB 프록시의 실행 로직을 정의한다.
+- JDK 동적 프록시를 설명할 때 예제와 거의 같은 코드이다.
+- `Object target` : 프록시가 호출할 실제 대상
+- `proxy.invoke(target, args)` : 실제 대상을 동적으로 호출한다.
+  - 참고로 `method` 를 사용해도 되지만, CGLIB는 성능상 `MethodProxy proxy` 를 사용하는 것을 권장한다.
+
+
+
+#### CglibTest
+
+``` java
+package hello.proxy.cglib;
+
+import hello.proxy.cglib.code.TimeMethodInterceptor;
+import hello.proxy.common.service.ConcreteService;
+import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Test;
+import org.springframework.cglib.proxy.Enhancer;
+
+@Slf4j
+public class CglibTest {
+    
+    @Test
+    void cglib() {
+        ConcreteService target = new ConcreteService();
+
+        Enhancer enhancer = new Enhancer();
+        enhancer.setSuperclass(ConcreteService.class);
+        enhancer.setCallback(new TimeMethodInterceptor(target));
+        ConcreteService proxy = (ConcreteService) enhancer.create();
+        log.info("targetClass={}", target.getClass());
+        log.info("proxyClass={}", proxy.getClass());
+        
+        proxy.call();
+    }
+}
+```
+
+ConcreteService 는 인터페이스가 없는 구체 클래스이다. 여기에 CGLIB를 사용해서 프록시를 생성해보자.
+
+- `Enhancer`: CGLIB는 `Enhancer` 를 사용해서 프록시를 생성한다.
+- `enhancer.setSuperclass(ConcreteService.class)`: CGLIB는 구체 클래스를 상속 받아서 프록시를 생성할 수 있다. 어떤 구체 클래스를 상속 받을지 지정한다.
+- `enhancer.setCallback(new TimeMethodInterceptor(target))`
+  - 프록시에 적용할 실행 로직을 할당한다.
+- `enhancer.create()` : 프록시를 생성한다. 앞서 설정한 `enhancer.setSuperclass(ConcreteService.class)` 에서 지정한 클래스를 상속 받아서 프록시가 만들어진다.
+
+JDK 동적 프록시는 인터페이스를 구현(implement)해서 프록시를 만든다. CGLIB는 구체 클래스를 상속(extends) 해서 프록시를 만든다.
+
+```
+## 실행결과
+CglibTest - targetClass=class hello.proxy.common.service.ConcreteService
+CglibTest - proxyClass=class hello.proxy.common.service.ConcreteService$$EnhancerByCGLIB$$25d6b0e3
+TimeMethodInterceptor - TimeProxy 실행
+ConcreteService - ConcreteService 호출
+TimeMethodInterceptor - TimeProxy 종료 resultTime=7
+```
+
+실행 결과를 보면 프록시가 정상 적용된 것을 확인하 수 있다.
+
+
+
+#### CGLIB가 생성한 프록시 클래스 이름
+
+CGLIB가 동적으로 생성하는 클래스 이름은 다음과 같은 규칙으로 생성된다. => `대상클래스$$EnahancerByCGLIB$$임의코드`
+
+참고로 다음은 JDK Proxy가 생성한 클래스 이름이다. => `proxyClass=class com.su.proxy.$Proxy1`
+
+![5-6](./img/5-6.png)
+
+
+
+#### CGLIB 제약
+
+- 클래스 기반 프록시는 상속을 사용하기 때문에 몇 가지 제약이 있다.
+  - 부모 클래스의 생성자를 체크해야 한다. => CGLIB는 자식 클래스를 동적으로 생성하기 때문에 기본 생성자가 필요하다.
+  - 클래스에 `final` 키워드가 붙으면 상속이 불가능하다. => CGLIB에서는 예외가 발생한다.
+  - 메서드에 `final` 키워드가 붙으면 해당 메서드를 오버라이딩 할 수 없다. => CGLIB 에서는 프록시 로직이 동작하지 않는다.
+
+> [참고]
+>
+> CGLIB를 사용하면 인터페이스가 없는 V2 애플리케이션에 동적 프록시를 적용할 수 있다. 그런데 지금 당장 적용하기에는 몇 가지 제약이 있다. V2 애플리케이션에 기본 생성자를 추가하고, 의존 관계를 setter 를 사용해서 주입하면 CGLIB를 적용할 수 있다. 하지만 다음에 학습하는 `ProxyFactory` 를 통해서 CGLIB를 적용하면 이런 단점을 해결하고 또 더 편리하기 떄문에, 애플리케이션에 CGLIB로 프록시를 적용하는 것은 조금 뒤에 알아본다.
+
+
+
+### 정리
+
+#### 남은 문제
+
+- 인터페이스가 있는 경우에는 JDK 동적 프록시를 적용하고, 그렇지 않은 경우에는 CGLIB를 적용하려면 어떻게 해야할까?
+- 두 기술을 함께 사용할 때 부가 기능을 제공하기 위해서 JDK 동적 프록시가 제공하는 `InvocationHandler` 와 CGLIB가 제공하는 `MethodInterceptor` 를 각각 중복으로 만들어서 관리해야 할까?
+- 특정 조건에 맞을 때 프록시 로직을 적용하는 기능도 공통으로 제공되었으면?
