@@ -888,3 +888,167 @@ ProxyFactory proxy=class com.sun.proxy.$Proxy54, target=class hello.proxy.app.v1
 ```
 
 V1 애플리케이션은 인터페이스가 있기 떄문에 프록시 팩토리가 JDK 동적 프록시를 적용한다. 애플리케이션 로딩 로그를 통해서 JDK 동적 프록시가 적용된 것을 확인할 수 있다.
+
+
+
+## 프록시 팩토리 - 적용2
+
+이번에는 인터페이스가 없고, 구체 클래스만 있는 v2 애플리케이션에 `LogTrace` 기능을 프록시 팩토리를 통해서 프록시를 만들어 적용해보자.
+
+``` java
+package hello.proxy.config.v3_proxyfactory;
+
+import hello.proxy.app.v2.OrderControllerV2;
+import hello.proxy.app.v2.OrderRepositoryV2;
+import hello.proxy.app.v2.OrderServiceV2;
+import hello.proxy.config.v3_proxyfactory.advice.LogTraceAdvice;
+import hello.proxy.trace.logtrace.LogTrace;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.aop.Advisor;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.aop.support.DefaultPointcutAdvisor;
+import org.springframework.aop.support.NameMatchMethodPointcut;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Slf4j
+@Configuration
+public class ProxyFactoryConfigV2 {
+
+    @Bean
+    public OrderControllerV2 orderControllerV2(LogTrace logTrace) {
+        OrderControllerV2 orderController = new OrderControllerV2(orderServiceV2(logTrace));
+
+        ProxyFactory factory = new ProxyFactory(orderController);
+        factory.addAdvisor(getAdvisor(logTrace));
+        OrderControllerV2 proxy = (OrderControllerV2) factory.getProxy();
+        log.info("ProxyFactory proxy={}, target={}", proxy.getClass(), orderController.getClass());
+        return proxy;
+    }
+
+    @Bean
+    public OrderServiceV2 orderServiceV2(LogTrace logTrace) {
+        OrderServiceV2 orderService = new OrderServiceV2(orderRepositoryV2(logTrace));
+
+        ProxyFactory factory = new ProxyFactory(orderService);
+        factory.addAdvisor(getAdvisor(logTrace));
+        OrderServiceV2 proxy = (OrderServiceV2) factory.getProxy();
+        log.info("ProxyFactory proxy={}, target={}", proxy.getClass(), orderService.getClass());
+        return proxy;
+    }
+
+    @Bean
+    public OrderRepositoryV2 orderRepositoryV2(LogTrace logTrace) {
+        OrderRepositoryV2 orderRepository = new OrderRepositoryV2();
+
+        ProxyFactory factory = new ProxyFactory(orderRepository);
+        factory.addAdvisor(getAdvisor(logTrace));
+        OrderRepositoryV2 proxy = (OrderRepositoryV2) factory.getProxy();
+        log.info("ProxyFactory proxy={}, target={}", proxy.getClass(), orderRepository.getClass());
+        return proxy;
+    }
+    
+    private Advisor getAdvisor(LogTrace logTrace) {
+        // pointcut
+        NameMatchMethodPointcut pointcut = new NameMatchMethodPointcut();
+        pointcut.setMappedNames("request*", "order*", "save*");
+        // advice
+        LogTraceAdvice advice = new LogTraceAdvice(logTrace);
+        // advisor = pointcut + advice
+        return new DefaultPointcutAdvisor(pointcut, advice);
+    }
+}
+```
+
+``` java
+package hello.proxy;
+
+import hello.proxy.config.v3_proxyfactory.ProxyFactoryConfigV1;
+import hello.proxy.config.v3_proxyfactory.ProxyFactoryConfigV2;
+import hello.proxy.trace.logtrace.LogTrace;
+import hello.proxy.trace.logtrace.ThreadLocalLogTrace;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+
+//@Import({AppV1Config.class, AppV2Config.class})
+//@Import(InterfaceProxyConfig.class)
+//@Import(ConcreteProxyConfig.class)
+//@Import(DynamicProxyBasicConfig.class)
+//@Import(DynamicProxyFilterConfig.class)
+//@Import(ProxyFactoryConfigV1.class)
+@Import(ProxyFactoryConfigV2.class)
+@SpringBootApplication(scanBasePackages = "hello.proxy.app") // 주의
+public class ProxyApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(ProxyApplication.class, args);
+	}
+
+	@Bean
+	public LogTrace logTrace() {
+		return new ThreadLocalLogTrace();
+	}
+}
+```
+
+ 프록시 팩토리를 통한 `ProxyFactoryConfigV2` 설정을 등록하고 실행하자.
+
+
+
+#### 애플리케이션 로딩 로그
+
+``` 
+
+  ProxyFactory proxy=class hello.proxy.app.v2.OrderRepositoryV2$
+  $EnhancerBySpringCGLIB$$594e4e8, target=class
+  hello.proxy.app.v2.OrderRepositoryV2
+  ProxyFactory proxy=class hello.proxy.app.v2.OrderServiceV2$
+  $EnhancerBySpringCGLIB$$59e5130b, target=class
+  hello.proxy.app.v2.OrderServiceV2
+  ProxyFactory proxy=class hello.proxy.app.v2.OrderControllerV2$
+  $EnhancerBySpringCGLIB$$79c0b9e, target=class
+  hello.proxy.app.v2.OrderControllerV2
+```
+
+V2 애플리케이션은 인터페이스가 없고 구체클래스만 있기 떄문에 프록시 팩토리가 CGLIB를 적용한다. 애플리케이션 로딩 로그를 통해서 CGLIB 프록시가 적용된 것을 확인할 수 있다.
+
+
+
+## 정리
+
+프록시 팩토리 덕분에 개발자는 매우 편리하게 프록시를 생성할 수 있게 되었다.
+
+추가로 어드바이저, 어드바이스, 포인트컷 이라는 개념 덕분에 어떤 부가 기능을 어디에 적용할지 명확하게 이해할 수 있었다.
+
+
+
+### 남은 문제
+
+프록시 팩토리와 어드바이저 같은 개념 덕분에 지금까지 고민했던 문제들은 해결되었다. 프록시도 깔끔하게 적용하고 포인트컷으로 어디에 부가 기능을 적용할지도 명확하게 정의할 수 있다. 원본 코드를 전혀 손대지 않고 프록시를 통해 부가 기능도 적용할 수 있었다.
+
+그런데 아직 해결되지 않는 문제가 있다.
+
+
+
+#### 문제1 - 너무 많은 설정
+
+바로 `ProxyFactoryConfigV1` , `ProxyFactoryConfigV2` 와 같은 설정 파일이 지나치게 많다는 점이다.
+
+예를 들어서 애플리케이션에 스프링 빈이 100개가 있다면 여기에 프록시를 통해 부가 기능을 적용하려면 100개의 동적 프록시 생성 코드를 만들어야 한다. 무수히 많은 설정 파일 때문에 설정 지옥을 경험하게 될 것이다.
+
+최근에는 스프링 빈을 등록하기 귀찮아서 컴포넌트 스캔까지 사용하는데, 이렇게 직접 등록하는 것도 모자라서, 프록시를 적용하는 코드까지 빈 생성 코드에 넣어야 한다.
+
+
+
+#### 문제2- 컴포넌트 스캔
+
+애플리케이션 V3 처럼 컴포넌트 스캔을 사용하는 경우 지금까지 학습한 방법으로는 프록시 적용이 불가능하다.
+
+왜냐하면 실제 객체를 컴포넌트 스캔으로 스프링 컨테이너에 스프링 빈으로 등록을 다 해버린 상태이기 때문이다.
+
+지금까지 학습한 프록시를 적용하려면, 실제 객체를 스프링 컨테이너에 빈으로 등록하는 것이 아니라 `ProxyFactoryConfigV1` 에서 한 것처럼, 부가 기능이 있는 프록시를 실제 객체 대신 스프링 컨테이너에 빈으로 등록해야 한다.
+
+**두 가지 문제를 한번에 해결하는 방법이 바로 다음에 설명할 빈 후 처리기이다.**
+
