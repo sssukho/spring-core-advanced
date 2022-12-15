@@ -680,7 +680,7 @@ EnableWebMvcConfiguration.requestMppingHandlerAdapter() time=63ms
 
 ### AspectJExpressionPointcut
 
-AspectJ 라는 AOP에 특화된 포인트컷 표현식을 적용할 수 있다. AspectJ 포인트컷 표현식과 AOP는 조금 뒤에 자세히 설명하겠다. 지금은 특별한 표현식으로 복잡한 포인트컷을 만들 수 있구나 라고 대략 이해하면 된다.
+AspectJ 라는 AOP에 특화된 포인트컷 표현식을 적용할 수 있다. AspectJ 포인트컷 표현식과 AOP는 조금 뒤에 자세히 설명하겠다. 지금은 특별한 표현식으로 복잡한 포인트컷을 만들 수 있구나 라고 대략 이해하면 된다. (실무에서는 이것만 씀)
 
 
 
@@ -776,12 +776,6 @@ public Advisor advisor3(LogTrace logTrace) {
 자동 프록시 생성기인 `AnnotationAwareAspectJAutoProxyCreator` 덕분에 개발자는 매우 편리하게 프록시를 적용할 수 있다. 이제 `Advisor` 만 스프링 빈으로 등록하면 된다.
 
 `Advisor`= `Pointcut` + `Advice`
-
-
-
-
-
-
 
 
 
