@@ -47,8 +47,8 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-@Target(ElementType.TYPE)
-@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.TYPE) // 클래스에 붙이는 어노테이션이다.
+@Retention(RetentionPolicy.RUNTIME) // 실행할 때까지 어노테이션이 살아 있음
 public @interface ClassAop {
 }
 ```
@@ -65,10 +65,10 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-@Target(ElementType.METHOD)
-@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD) // 메소드에 붙이는 어노테이션이다.
+@Retention(RetentionPolicy.RUNTIME) // 실행할 때까지 어노테이션이 살아 있음
 public @interface MethodAop {
-    String value();
+    String value(); // anotation 도 값을 가질 수 있음
 }
 ```
 
@@ -160,7 +160,7 @@ helloMethod=public java.lang.String hello.aop.member.MemberServiceImpl.hello(jav
 
 
 
-### execution1
+## execution1
 
 #### execution 문법
 
@@ -423,6 +423,174 @@ void argsMatchComplex() {
   - ex) `(String)`, `(String, Xxx)`, `(String, Xx, Xxx)` 허용
 
 
+
+## Within
+
+within 지시자는 특정 타입 내의 조인 포인트에 대한 매칭을 제한한다. 쉽게 이야기해서 해당 타입이 매칭되면 그 안의 메서드(조인 포인트)들이 자동으로 매칭된다. 문법은 단순한데 `execution` 에서 타입 부분만 사용한다고 보면 된다.
+
+
+
+#### WithinTest
+
+``` java
+package hello.aop.pointcut;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import hello.aop.member.MemberServiceImpl;
+import java.lang.reflect.Method;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.aop.aspectj.AspectJExpressionPointcut;
+
+public class WithinTest {
+    AspectJExpressionPointcut pointcut = new AspectJExpressionPointcut();
+    Method helloMethod;
+
+    @BeforeEach
+    public void init() throws NoSuchMethodException {
+        helloMethod = MemberServiceImpl.class.getMethod("hello", String.class);
+    }
+
+    @Test
+    void withinExact() {
+        pointcut.setExpression("within(hello.aop.member.MemberServiceImpl)");
+        assertThat(pointcut.matches(helloMethod, MemberServiceImpl.class)).isTrue();
+    }
+
+    @Test
+    void withinStar() {
+        pointcut.setExpression("within(hello.aop.member.*Service*)");
+        assertThat(pointcut.matches(helloMethod, MemberServiceImpl.class)).isTrue();
+    }
+    
+    @Test
+    void withinSubPackage() {
+        pointcut.setExpression("within(hello.aop..*)");
+        assertThat(pointcut.matches(helloMethod, MemberServiceImpl.class)).isTrue();
+    }
+}
+```
+
+#### 주의
+
+그런데 `within` 사용시 주의해야 할 점이 있다. 표현식에 부모 타입을 지정하면 안된다는 점이다. 정확하게 타입이 맞아야 한다. 이 부분에서 `execution` 과 차이가 난다.
+
+
+
+### WithinTest - 추가
+
+``` java
+@Test
+@DisplayName("타켓의 타입에만 직접 적용, 인터페이스를 선정하면 안된다.")
+void withinSuperTypeFalse() {
+  pointcut.setExpression("within(hello.aop.member.MemberService)");
+  assertThat(pointcut.matches(helloMethod, MemberServiceImpl.class)).isFalse();
+}
+
+@Test
+@DisplayName("execution은 타입 기반, 인터페이스를 선정 가능.")
+void executionSuperTypeTrue() {
+  pointcut.setExpression("execution(* hello.aop.member.MemberService.*(..))");
+  assertThat(pointcut.matches(helloMethod, MemberServiceImpl.class)).isTrue();
+}
+```
+
+부모 타입(여기서는 `MemberService` 인터페이스) 지정시 `within` 은 실패하고, `execution` 은 성공하는 것을 확인할 수 있다.
+
+
+
+## args
+
+- args: 인자가 주어진 타입의 인스턴스인 조인 포인트로 매칭
+- 기본 문법은 `execution` 의 `args` 부분과 같다.
+
+
+
+#### execution과 args의 차이점
+
+- `execution` 은 파라미터 타입이 정확하게 매칭되어야 한다. `execution` 은 클래스에 선언된 정보를 기반으로 판단한다.
+- `args` 는 부모 타입을 허용한다. `args` 는 실제 넘어온 파라미터 객체 인스턴스를 보고 판단한다.
+
+
+
+### ArgsTest
+
+``` java
+package hello.aop.pointcut;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import hello.aop.member.MemberServiceImpl;
+import java.lang.reflect.Method;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.aop.aspectj.AspectJExpressionPointcut;
+
+public class ArgsTest {
+    Method helloMethod;
+
+    @BeforeEach
+    public void init() throws NoSuchMethodException {
+        helloMethod = MemberServiceImpl.class.getMethod("hello", String.class);
+    }
+
+    private AspectJExpressionPointcut pointcut(String expression) {
+        AspectJExpressionPointcut pointcut = new AspectJExpressionPointcut();
+        pointcut.setExpression(expression);
+        return pointcut;
+    }
+
+    @Test
+    void args() {
+        // hello(String)과 매칭
+        assertThat(pointcut("args(String)")
+                .matches(helloMethod, MemberServiceImpl.class)).isTrue();
+        assertThat(pointcut("args(Object)")
+                .matches(helloMethod, MemberServiceImpl.class)).isTrue();
+        assertThat(pointcut("args()")
+                .matches(helloMethod, MemberServiceImpl.class)).isFalse();
+        assertThat(pointcut("args(..)")
+                .matches(helloMethod, MemberServiceImpl.class)).isTrue();
+        assertThat(pointcut("args(*)")
+                .matches(helloMethod, MemberServiceImpl.class)).isTrue();
+        assertThat(pointcut("args(String,..)")
+                .matches(helloMethod, MemberServiceImpl.class)).isTrue();
+    }
+
+    /**
+     * execution(* *(java.io.Serializable)): 메서드의 시그니처로 판단 (정적)
+     * args(java.io.Serializable): 런타임에 전달된 인수로 판단 (동적)
+     */
+    @Test
+    void argsVsExecution() {
+        //Args
+        assertThat(pointcut("args(String)")
+                .matches(helloMethod, MemberServiceImpl.class)).isTrue();
+        assertThat(pointcut("args(java.io.Serializable)")
+                .matches(helloMethod, MemberServiceImpl.class)).isTrue();
+        assertThat(pointcut("args(Object)")
+                .matches(helloMethod, MemberServiceImpl.class)).isTrue();
+        //Execution
+        assertThat(pointcut("execution(* *(String))")
+                .matches(helloMethod, MemberServiceImpl.class)).isTrue();
+        assertThat(pointcut("execution(* *(java.io.Serializable))") // 매칭 실패
+                .matches(helloMethod, MemberServiceImpl.class)).isFalse();
+        assertThat(pointcut("execution(* *(Object))") // 매칭 실패
+                .matches(helloMethod, MemberServiceImpl.class)).isFalse();
+
+    }
+}
+```
+
+- `pointcut()`: `AspectJExpressionPointcut` 에 포인트컷은 한번만 지정할 수 있다. 이번 테스트에서는 테스트를 편리하게 진행하기 위해 포인트컷을 여러번 지정하기 위해 포인트컷 자체를 생성하는 메서드를 만들었다.
+- 자바가 기본으로 제공하는 `String`은 `Object`, `java.io.Serializable` 의 하위 타입이다.
+- 정적으로 클래스에 선언된 정보만 보고 판단하는 `execution(* *(Object))` 는 매칭에 실패한다.
+- 동적으로 실제 파라미터로 넘어온 객체 인스턴스로 판단하는 `args(Object)` 매칭에 성공한다. (부모 타입 허용)
+
+> 참고
+>
+> `args` 지시자는 단독으로 사용되기 보다는 뒤에서 설명할 파라미터 바인딩에서 주로 사용된다.
 
 
 
